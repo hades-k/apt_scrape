@@ -73,8 +73,8 @@ for AREA in "${AREAS[@]}"; do
     --end-page "$END_PAGE" \
     -o "$OUTPUT_FILE" 2>&1 | tee -a "$LOG_FILE"
   
-  # Check exit status
-  if [ ${PIPESTATUS[0]} -eq 0 ]; then
+  # Check exit status (zsh: pipestatus is lowercase and 1-indexed)
+  if [ ${pipestatus[1]} -eq 0 ]; then
     echo "✓ Success: $AREA → $OUTPUT_FILE" | tee -a "$LOG_FILE"
     ((SUCCESS_COUNT++))
   else
