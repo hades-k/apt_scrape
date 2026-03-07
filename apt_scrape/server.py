@@ -54,6 +54,8 @@ logger = logging.getLogger("apt_scrape.server")
 REQUEST_DELAY_SECONDS = 2.0
 DEFAULT_MAX_PAGES = 1
 MAX_PAGES_LIMIT = 10
+DETAIL_CONCURRENCY = int(os.getenv("DETAIL_CONCURRENCY", "5"))
+VPN_ROTATE_EVERY_BATCHES = int(os.getenv("VPN_ROTATE_EVERY_BATCHES", "3"))
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ class BrowserManager:
         self._rotate_every: int = int(os.getenv("PROXY_ROTATE_EVERY", "15"))
         self._relay_proc = None
         self._relay_port: int = 0
+        self._rotation_lock = asyncio.Lock()
 
         if self._proxy_list:
             logger.info(
@@ -227,27 +230,36 @@ class BrowserManager:
     async def rotate_proxy(self) -> None:
         """Close the current context and reopen it with the next proxy.
 
+        Thread-safe via ``_rotation_lock`` — if a rotation is already in
+        progress (e.g. two parallel slots both detected a block), the second
+        caller returns immediately instead of rotating twice.
+
         Pauses for 60 seconds when the full proxy list has been cycled through.
         """
         if not self._proxy_list:
             return
-        if self._context:
-            try:
-                await self._context.close()
-            except Exception as exc:
-                logger.debug("Error closing context during rotation: %s", exc)
-            self._context = None
-        self._proxy_index = (self._proxy_index + 1) % len(self._proxy_list)
-        if self._proxy_index == 0:
-            logger.warning(
-                "All proxies cycled — pausing 60 s before restarting rotation."
+        if self._rotation_lock.locked():
+            # Another coroutine is already rotating; wait for it to finish.
+            async with self._rotation_lock:
+                return
+        async with self._rotation_lock:
+            if self._context:
+                try:
+                    await self._context.close()
+                except Exception as exc:
+                    logger.debug("Error closing context during rotation: %s", exc)
+                self._context = None
+            self._proxy_index = (self._proxy_index + 1) % len(self._proxy_list)
+            if self._proxy_index == 0:
+                logger.warning(
+                    "All proxies cycled — pausing 60 s before restarting rotation."
+                )
+                await asyncio.sleep(60)
+            self._requests_since_rotation = 0
+            await self._ensure_context()
+            logger.info(
+                "Rotated to proxy: %s", self._proxy_list[self._proxy_index]["server"]
             )
-            await asyncio.sleep(60)
-        self._requests_since_rotation = 0
-        await self._ensure_context()
-        logger.info(
-            "Rotated to proxy: %s", self._proxy_list[self._proxy_index]["server"]
-        )
 
     async def _rate_limit(self) -> None:
         """Enforce the minimum delay between consecutive requests."""
@@ -287,6 +299,52 @@ class BrowserManager:
 
         if self._proxy_list and self._detect_block(html):
             logger.warning("Block detected on %s — rotating proxy and retrying.", url)
+            await self.rotate_proxy()
+            html = await self._fetch_once(url, wait_selector)
+            if self._detect_block(html):
+                logger.error("Still blocked on %s after proxy rotation.", url)
+                raise RuntimeError(f"Blocked on {url} even after proxy rotation.")
+
+        self._requests_since_rotation += 1
+        return html
+
+    async def fetch_page_parallel(
+        self,
+        url: str,
+        wait_selector: str | None = None,
+        stagger_secs: float = 0.0,
+    ) -> str:
+        """Fetch *url* without the per-request rate limiter, suitable for use
+        inside ``asyncio.gather`` batches.
+
+        Stagger is applied via an up-front sleep so that slots within the same
+        batch are spread out slightly.  Reactive block-detection and proxy
+        rotation are retained; proactive per-request rotation is skipped
+        because batch-level rotation in ``enrichment`` handles it instead.
+
+        Args:
+            url: Page URL to fetch.
+            wait_selector: Optional CSS selector to wait for after page load.
+            stagger_secs: Seconds to sleep before starting the fetch.  Pass
+                ``slot_index * STAGGER_SECONDS`` so each slot in a batch
+                starts slightly after the previous one.
+
+        Returns:
+            Raw HTML string of the rendered page.
+
+        Raises:
+            RuntimeError: When the page is blocked even after proxy rotation.
+        """
+        if stagger_secs > 0:
+            await asyncio.sleep(stagger_secs)
+        await self._ensure_browser()
+
+        html = await self._fetch_once(url, wait_selector)
+
+        if self._proxy_list and self._detect_block(html):
+            logger.warning(
+                "Block detected on %s (parallel fetch) — rotating proxy and retrying.", url
+            )
             await self.rotate_proxy()
             html = await self._fetch_once(url, wait_selector)
             if self._detect_block(html):
@@ -472,6 +530,17 @@ class SearchListingsInput(BaseModel):
         ge=1,
         le=200,
     )
+    detail_concurrency: int = Field(
+        default=DETAIL_CONCURRENCY,
+        description="Parallel detail page fetches per batch (default: DETAIL_CONCURRENCY env var or 5)",
+        ge=1,
+        le=20,
+    )
+    vpn_rotate_batches: int = Field(
+        default=VPN_ROTATE_EVERY_BATCHES,
+        description="Rotate VPN every N batches of detail fetches (default: VPN_ROTATE_EVERY_BATCHES env var or 3)",
+        ge=1,
+    )
 
     @field_validator("city")
     @classmethod
@@ -651,11 +720,15 @@ async def search_listings(params: SearchListingsInput) -> str:
 
     if params.include_details and all_listings:
         detail_enriched, detail_errors = await enrich_with_details(
-            all_listings, browser, adapter, params.detail_limit
+            all_listings, browser, adapter, params.detail_limit,
+            concurrency=params.detail_concurrency,
+            rotate_every_batches=params.vpn_rotate_batches,
         )
 
     post_date_enriched, post_date_errors = await enrich_post_dates(
-        all_listings, browser, adapter
+        all_listings, browser, adapter,
+        concurrency=params.detail_concurrency,
+        rotate_every_batches=params.vpn_rotate_batches,
     )
 
     return _json(

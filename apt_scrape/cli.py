@@ -153,6 +153,20 @@ def cli() -> None:
     default=None,
     help="Max number of detail pages to fetch (default: all).",
 )
+@click.option(
+    "--detail-concurrency",
+    type=int,
+    default=None,
+    show_default=True,
+    help="Parallel detail page fetches per batch (default: DETAIL_CONCURRENCY env var or 5).",
+)
+@click.option(
+    "--vpn-rotate-batches",
+    type=int,
+    default=None,
+    show_default=True,
+    help="Rotate VPN every N batches of detail fetches (default: VPN_ROTATE_EVERY_BATCHES env var or 3).",
+)
 @click.option("--include-csv", is_flag=True, help="Embed CSV export in JSON output.")
 @click.option("--include-table", is_flag=True, help="Embed markdown table in JSON output.")
 @click.option(
@@ -182,6 +196,8 @@ def search(
     max_pages: int,
     include_details: bool,
     detail_limit: int | None,
+    detail_concurrency: int | None,
+    vpn_rotate_batches: int | None,
     include_csv: bool,
     include_table: bool,
     table_max_rows: int,
@@ -217,6 +233,8 @@ def search(
             max_pages=max_pages,
             include_details=include_details,
             detail_limit=detail_limit,
+            detail_concurrency=detail_concurrency,
+            vpn_rotate_batches=vpn_rotate_batches,
             include_csv=include_csv,
             include_table=include_table,
             table_max_rows=table_max_rows,
@@ -244,6 +262,8 @@ async def _run_search(
     max_pages: int,
     include_details: bool,
     detail_limit: int | None,
+    detail_concurrency: int | None,
+    vpn_rotate_batches: int | None,
     include_csv: bool,
     include_table: bool,
     table_max_rows: int,
@@ -331,13 +351,21 @@ async def _run_search(
         post_date_enriched = 0
         post_date_errors: list[dict] = []
 
+        from apt_scrape.server import DETAIL_CONCURRENCY, VPN_ROTATE_EVERY_BATCHES
+        eff_concurrency = detail_concurrency if detail_concurrency is not None else DETAIL_CONCURRENCY
+        eff_rotate = vpn_rotate_batches if vpn_rotate_batches is not None else VPN_ROTATE_EVERY_BATCHES
+
         if include_details and deduped:
             detail_enriched, detail_errors = await enrich_with_details(
-                deduped, browser, adapter, detail_limit
+                deduped, browser, adapter, detail_limit,
+                concurrency=eff_concurrency,
+                rotate_every_batches=eff_rotate,
             )
 
         post_date_enriched, post_date_errors = await enrich_post_dates(
-            deduped, browser, adapter
+            deduped, browser, adapter,
+            concurrency=eff_concurrency,
+            rotate_every_batches=eff_rotate,
         )
 
         return json.dumps(
