@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "rental-scraper": {
+      "command": "python",
+      "args": ["server.py"],
+      "cwd": "/path/to/rental-scraper-mcp",
+      "env": {}
+    }
+  }
+}
