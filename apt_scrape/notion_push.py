@@ -195,12 +195,17 @@ def _build_properties(listing: dict, area_page_id: Optional[str], agency_page_id
     if source:
         props["Source"] = {"select": {"name": source}}
     if energy:
-        props["Energy Class"] = {"select": {"name": energy}}
+        # Notion select options cannot contain commas and have length limits
+        safe_energy = energy.replace(",", " ").strip()[:100]
+        if safe_energy:
+            props["Energy Class"] = {"select": {"name": safe_energy}}
 
     # AI analysis fields (only if present)
     ai_stars = listing.get("ai_stars")
     if ai_stars:
-        props["Score"] = {"select": {"name": ai_stars}}
+        safe_stars = ai_stars.replace(",", " ").strip()[:100]
+        if safe_stars:
+            props["Score"] = {"select": {"name": safe_stars}}
     ai_score = listing.get("ai_score")
     if ai_score is not None:
         props["AI Score"] = {"number": ai_score}

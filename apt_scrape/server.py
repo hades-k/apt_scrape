@@ -295,14 +295,33 @@ class BrowserManager:
             )
             await self.rotate_proxy()
 
-        html = await self._fetch_once(url, wait_selector)
-
-        if self._proxy_list and self._detect_block(html):
-            logger.warning("Block detected on %s — rotating proxy and retrying.", url)
-            await self.rotate_proxy()
+        try:
             html = await self._fetch_once(url, wait_selector)
-            if self._detect_block(html):
-                logger.error("Still blocked on %s after proxy rotation.", url)
+        except Exception as exc:
+            if not self._proxy_list:
+                raise
+            logger.warning("Fetch error on %s (%s) — rotating proxy and retrying.", url, exc)
+            html = None
+
+        if self._proxy_list and (html is None or self._detect_block(html)):
+            # Cycle through ALL remaining proxies before giving up
+            for attempt in range(len(self._proxy_list)):
+                logger.warning(
+                    "Block/timeout on %s — rotating proxy (attempt %d/%d).",
+                    url, attempt + 1, len(self._proxy_list),
+                )
+                await self.rotate_proxy()
+                await asyncio.sleep(3)
+                try:
+                    html = await self._fetch_once(url, wait_selector)
+                except Exception as exc:
+                    logger.warning("Fetch error after rotation (attempt %d): %s", attempt + 1, exc)
+                    html = None
+                    continue
+                if not self._detect_block(html):
+                    break
+            else:
+                logger.error("All proxies failed on %s.", url)
                 raise RuntimeError(f"Blocked on {url} even after proxy rotation.")
 
         self._requests_since_rotation += 1
@@ -339,16 +358,32 @@ class BrowserManager:
             await asyncio.sleep(stagger_secs)
         await self._ensure_browser()
 
-        html = await self._fetch_once(url, wait_selector)
-
-        if self._proxy_list and self._detect_block(html):
-            logger.warning(
-                "Block detected on %s (parallel fetch) — rotating proxy and retrying.", url
-            )
-            await self.rotate_proxy()
+        try:
             html = await self._fetch_once(url, wait_selector)
-            if self._detect_block(html):
-                logger.error("Still blocked on %s after proxy rotation.", url)
+        except Exception as exc:
+            if not self._proxy_list:
+                raise
+            logger.warning("Fetch error on %s (%s) — rotating proxy and retrying.", url, exc)
+            html = None
+
+        if self._proxy_list and (html is None or self._detect_block(html)):
+            for attempt in range(len(self._proxy_list)):
+                logger.warning(
+                    "Block/timeout on %s (parallel) — rotating proxy (attempt %d/%d).",
+                    url, attempt + 1, len(self._proxy_list),
+                )
+                await self.rotate_proxy()
+                await asyncio.sleep(3)
+                try:
+                    html = await self._fetch_once(url, wait_selector)
+                except Exception as exc:
+                    logger.warning("Fetch error after rotation (attempt %d): %s", attempt + 1, exc)
+                    html = None
+                    continue
+                if not self._detect_block(html):
+                    break
+            else:
+                logger.error("All proxies failed on %s.", url)
                 raise RuntimeError(f"Blocked on {url} even after proxy rotation.")
 
         self._requests_since_rotation += 1

@@ -31,6 +31,7 @@ from .base import (
     extract_text,
 )
 from .casa import CasaAdapter
+from .idealista import IdealistaAdapter
 from .immobiliare import ImmobiliareAdapter
 
 __all__ = [
@@ -61,6 +62,7 @@ __all__ = [
 ADAPTERS: list[SiteAdapter] = [
     ImmobiliareAdapter(),
     CasaAdapter(),
+    IdealistaAdapter(),
 ]
 
 _BY_ID: dict[str, SiteAdapter] = {a.site_id: a for a in ADAPTERS}

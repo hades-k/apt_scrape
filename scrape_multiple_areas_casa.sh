@@ -4,9 +4,9 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 [[ -f "$SCRIPT_DIR/.env" ]] && set -a && source "$SCRIPT_DIR/.env" && set +a
 PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
-OUTPUT_DIR="results/latest/batch2"
+OUTPUT_DIR="results/latest/batch_casa"
 
-# Search parameters
+# Search parameters (mirrors scrape_multiple_areas.sh)
 CITY="milano"
 OPERATION="affitto"
 PROPERTY_TYPES="appartamenti,attici"
@@ -15,25 +15,23 @@ MAX_PRICE=1000
 MIN_SQM=55
 MIN_ROOMS=2
 SORT="piu-recenti"
-SOURCE="immobiliare"
+SOURCE="casa"
 START_PAGE=1
 END_PAGE=10
 DETAIL_CONCURRENCY=5   # parallel detail-page fetches per batch
 VPN_ROTATE_BATCHES=3   # rotate VPN every N batches
 
-# List of areas to scrape (add or remove as needed)
+# List of areas to scrape (same as main multi-area script; edit as needed)
 AREAS=(
-  # "bicocca"
+  "bicocca"
   # "niguarda"
   # "precotto"
-  # "loreto"
   # "citta-studi"
   # "lambrate"
-  "turro"
-  "greco-segnano"
+  # "turro"
+  # "greco-segnano"
   # "crescenzago"
   # "centrale"
-#   "pasteur-rovereto"
 )
 
 # Create output directory if it doesn't exist
@@ -57,7 +55,6 @@ draw_progress() {
   local empty=$(( bar_width - filled ))
   local bar="$(printf '%0.s█' $(seq 1 $filled))$(printf '%0.s░' $(seq 1 $empty))"
   local pct=$(( done * 100 / total ))
-  # \r returns to start of line; no newline so next call overwrites
   printf "\r  [%s] %3d%%  %-20s  %s" "$bar" "$pct" "$label" "$suffix"
 }
 
@@ -67,7 +64,7 @@ cursor_up() { printf "\033[%dA" "$1"; }
 
 # Print header (goes to terminal AND log)
 {
-  echo "=== rent-fetch: multi-area scrape ==="
+  echo "=== rent-fetch: multi-area scrape (casa.it) ==="
   echo "City         : $CITY"
   echo "Property     : $PROPERTY_TYPES"
   echo "Price / size : max €${MAX_PRICE}  min ${MIN_SQM}m²  min ${MIN_ROOMS} rooms"
@@ -94,8 +91,6 @@ for AREA in "${AREAS[@]}"; do
   OUTPUT_FILE="${OUTPUT_DIR}/${CITY}_${AREA}_${PROPERTY_TYPES//,/_}_pages${START_PAGE}_${END_PAGE}_recent.json"
 
   # Show "running" state for this row, leave others intact
-  # We are currently on the correct line (cursor was moved up to line 1 initially,
-  # then each iteration ends by moving to the next line)
   draw_progress $IDX $TOTAL "$AREA" "running..."
 
   # Run scraper — all output goes to log only
@@ -119,9 +114,6 @@ for AREA in "${AREAS[@]}"; do
     --end-page "$END_PAGE" \
     --detail-concurrency "$DETAIL_CONCURRENCY" \
     --vpn-rotate-batches "$VPN_ROTATE_BATCHES" \
-    --include-details \
-    --analyse \
-    --push-notion \
     -o "$OUTPUT_FILE" >> "$LOG_FILE" 2>&1
   EXIT_CODE=$?
 

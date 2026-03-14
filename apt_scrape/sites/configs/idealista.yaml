@@ -1,0 +1,137 @@
+site_id: idealista
+display_name: Idealista.it
+base_url: https://www.idealista.it
+domain_pattern: 'idealista\.it'
+
+# Idealista uses path-based filters: /{operation}-{property_type}/{city}/{area}/con-{filters}/
+search_path_template: "/{operation}-{property_type}/{city}/"
+
+# Path-based filter mapping (used by custom build_search_url)
+# Pattern from working URL: prezzo_2700,prezzo-min_100,dimensione_40,dimensione-max_600
+path_filter_map:
+  max_price: prezzo_{value}
+  min_price: prezzo-min_{value}
+  min_sqm: dimensione_{value}
+  max_sqm: dimensione-max_{value}
+
+# Room count mapping for path filters
+room_filter_map:
+  "2": bilocali-2
+  "3": trilocali-3
+  "4": quadrilocali-4
+  "5": 5-locali-o-piu
+
+# Idealista sort options
+sort_map:
+  piu-recenti: ultime-24-ore
+  recenti: ultime-24-ore
+  data: ultime-24-ore
+  newest: ultime-24-ore
+
+# Area slug mapping: simple name → Idealista zone/neighborhood path
+# The format is always {macro-zone}/{specific-neighborhood}
+# Verified: citta-studi (from example URL)
+area_map:
+  bicocca: comasina-bicocca/bicocca-bignami
+  niguarda: comasina-bicocca/niguarda
+  precotto: greco-turro/precotto
+  loreto: greco-turro/nolo-brianza-pasteur
+  citta-studi: citta-studi-lambrate/citta-studi
+  lambrate: citta-studi-lambrate/lambrate
+  turro: greco-turro/turro
+  greco-segnano: greco-turro/greco
+  crescenzago: greco-turro/crescenzago
+  centrale: garibaldi-porta-venezia/centrale
+
+# Pagination via URL path
+page_param: pagina
+page_path_template: "pagina-{page}.htm"
+
+search_wait_selector: "article.item"
+detail_wait_selector: "h1"
+
+property_type_map:
+  case: case
+  appartamenti: case
+  attici: case
+  ville: ville
+  loft: case
+
+operation_map:
+  affitto: affitto
+  vendita: vendita
+
+search_selectors:
+  listing_card:
+    - "article.item"
+    - "article[class*='item']"
+    - "div[class*='item-info']"
+  title:
+    - "a.item-link"
+    - "a[class*='item-link']"
+    - "h2 a"
+    - "a[href*='/immobile/']"
+  price:
+    - "span.item-price"
+    - "[class*='item-price']"
+    - "[class*='price']"
+  features:
+    - "span.item-detail"
+    - "[class*='item-detail']"
+    - "span[class*='feature']"
+  address:
+    - "span.item-link"
+    - "[class*='item-link']"
+    - "[class*='address']"
+  thumbnail:
+    - "img[data-ondemand-img]"
+    - "img[data-src]"
+    - "picture img"
+    - "img"
+  description:
+    - "div.item-description"
+    - "[class*='description']"
+
+detail_selectors:
+  title:
+    - "h1.main-info__title"
+    - "h1[class*='main-info']"
+    - "h1"
+  price:
+    - "span.info-data-price"
+    - "[class*='info-data-price']"
+    - "[class*='price']"
+  description:
+    - "div.comment"
+    - "[class*='comment']"
+    - "[class*='description']"
+  features_keys:
+    - "ul.details-property_features li"
+    - "[class*='details-property'] dt"
+    - "dl dt"
+  features_values:
+    - "ul.details-property_features li"
+    - "[class*='details-property'] dd"
+    - "dl dd"
+  address:
+    - "span.main-info__title-minor"
+    - "[class*='main-info__title-minor']"
+    - "[class*='address']"
+  photos:
+    - "div.detail-multimedia-gallery img"
+    - "[class*='multimedia-gallery'] img"
+    - "picture img"
+    - "img[data-ondemand-img]"
+  energy_class:
+    - "span.energy-certificate"
+    - "[class*='energy']"
+  agency:
+    - "div.advertiser-name"
+    - "[class*='advertiser']"
+    - "[class*='agency']"
+  costs_keys:
+    - "div.details-property_costs dt"
+    - "[class*='costs'] dt"
+  costs_values:
+    - "div.details-property_costs dd"
+    - "[class*='costs'] dd"

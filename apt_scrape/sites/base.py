@@ -367,7 +367,7 @@ def classify_feature(text: str) -> ClassifyResult | None:
         ``None`` if the text does not match any known category.
     """
     t = text.lower()
-    if "m²" in t or "mq" in t:
+    if "m²" in t or "mq" in t or "m2" in t:
         return ("sqm", text)
     if "local" in t or "vani" in t:
         return ("rooms", text)
