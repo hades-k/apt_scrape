@@ -11,6 +11,7 @@ Usage::
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import click
@@ -176,6 +177,8 @@ def cli() -> None:
     show_default=True,
     help="Row limit for the markdown table preview.",
 )
+@click.option("--analyse", is_flag=True, help="Score each listing with AI against preferences.txt.")
+@click.option("--push-notion", "push_notion", is_flag=True, help="Push listings to Notion Apartments DB.")
 @click.option("-o", "--output", default=None, type=click.Path(), help="Write output to file.")
 def search(
     city: str,
@@ -201,6 +204,8 @@ def search(
     include_csv: bool,
     include_table: bool,
     table_max_rows: int,
+    analyse: bool,
+    push_notion: bool,
     output: str | None,
 ) -> None:
     """Search for property listings and output structured JSON."""
@@ -238,6 +243,8 @@ def search(
             include_csv=include_csv,
             include_table=include_table,
             table_max_rows=table_max_rows,
+            analyse=analyse,
+            push_notion=push_notion,
         )
     )
     _write_output(result, output)
@@ -267,6 +274,8 @@ async def _run_search(
     include_csv: bool,
     include_table: bool,
     table_max_rows: int,
+    analyse: bool = False,
+    push_notion: bool = False,
 ) -> str:
     """Async implementation of the search command."""
     try:
@@ -368,6 +377,24 @@ async def _run_search(
             rotate_every_batches=eff_rotate,
         )
 
+        # Stamp area/city onto each listing for analysis and Notion push
+        for listing in deduped:
+            listing["_area"] = area_slug or ""
+            listing["_city"] = city_slug
+
+        if analyse and deduped:
+            from apt_scrape.analysis import analyse_listings, load_preferences
+            try:
+                prefs = load_preferences()
+            except FileNotFoundError as e:
+                click.echo(f"[warn] {e} — skipping AI analysis.", err=True)
+            else:
+                await analyse_listings(deduped, prefs)
+
+        if push_notion and deduped:
+            from apt_scrape.notion_push import push_listings
+            await push_listings(deduped)
+
         return json.dumps(
             {
                 "count": len(deduped),
@@ -395,6 +422,65 @@ async def _run_search(
         )
     finally:
         await browser.close()
+
+
+# ---------------------------------------------------------------------------
+# push
+# ---------------------------------------------------------------------------
+
+
+@cli.command("push")
+@click.argument("json_file", type=click.Path(exists=True))
+@click.option("--analyse", is_flag=True, help="Score each listing with AI against preferences.txt.")
+@click.option("--push-notion", "push_notion", is_flag=True, help="Push listings to Notion Apartments DB.")
+def push(json_file: str, analyse: bool, push_notion: bool) -> None:
+    """Post-process an existing JSON result file: re-run analysis and/or push to Notion.
+
+    JSON_FILE is the path to a previously saved search result JSON file.
+    The file is updated in-place (atomically) with any new ai_* or notion_* fields.
+    """
+    asyncio.run(_run_push(json_file, analyse, push_notion))
+
+
+async def _run_push(json_file: str, analyse: bool, push_notion: bool) -> None:
+    """Async implementation of the push command."""
+    import tempfile
+
+    path = Path(json_file)
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    listings = envelope.get("listings", [])
+    area_slug = envelope.get("area") or ""
+    city_slug = envelope.get("city") or ""
+
+    # Stamp area/city onto each listing
+    for listing in listings:
+        listing["_area"] = area_slug
+        listing["_city"] = city_slug
+
+    if analyse and listings:
+        from apt_scrape.analysis import analyse_listings, load_preferences
+        try:
+            prefs = load_preferences()
+        except FileNotFoundError as e:
+            click.echo(f"[warn] {e} — skipping AI analysis.", err=True)
+        else:
+            await analyse_listings(listings, prefs)
+
+    if push_notion and listings:
+        from apt_scrape.notion_push import push_listings
+        await push_listings(listings)
+
+    # Atomic write back (write to .tmp then rename to avoid corruption on failure)
+    envelope["listings"] = listings
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(envelope, f, indent=2, ensure_ascii=False)
+        Path(tmp_path).replace(path)
+        click.echo(f"Updated {json_file}", err=True)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
 
 
 # ---------------------------------------------------------------------------
